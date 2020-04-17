@@ -11,33 +11,15 @@ output:
 runtime: shiny
 ---
 
-<style>
-.reveal .slides{
-    width: 90% !important;
-}
-</style>
-
 ```{r setup, include=FALSE}
-library(flexdashboard)
-library(shiny)
-library(dplyr)
-library(ggplot2)
-library(viridis)
-library(cowplot)
-library(jsonlite)
-library(RCurl)
-library(stringr)
-library(lubridate)
-library(tidyverse)
-library(rgeos)
-library(brazilmaps)
-library(geofacet)
-library(ggrepel)
-library(knitr)
-library(kableExtra)
+# Carregar pacotes
+packages<-c("flexdashboard", "shiny", "dplyr","ggplot2","viridis","viridis","cowplot","jsonlite","RCurl","stringr","lubridate","tidyverse","rgeos","brazilmaps","geofacet","ggrepel","knitr","kableExtra")
+lapply(packages, require, character.only = TRUE)
 
+# Dados oficiais compilados pelo G1
 url_dados <- "https://api.especiaisg1.globo/api/eventos/brasil/"
 
+# Manipulação de dados
 dados_municipio <- fromJSON(getURL(url_dados)) %>%
   as.data.frame() %>%
 select_all(~str_remove(., "docs.")) %>%
@@ -68,14 +50,17 @@ dados_municipio <- dados_municipio %>%
   ungroup() %>%
   arrange(date)
 
+# Carregar dados do censo IBGE 2019
 popmun <- read.csv2('pop_municipios.csv',encoding = 'UTF-8')
 
+# Vincular dados do IBGE
 dados_municipio$pop <- popmun$pop[match(dados_municipio$city_cod,popmun[,1])]
 dados_municipio$city_name <- stringi::stri_trans_general(str = popmun$city_name[match(dados_municipio$city_cod,popmun[,1])], 
                                    id = "Latin-ASCII")
 dados_municipio <- dados_municipio%>%mutate(ac_cases_m = ac_cases * 100000 / pop,
                                                 ac_deaths_m = ac_deaths * 100000 / pop)
 
+# Criar conjuntos de referencias
 estados <- c(12,27,16,13,29,23,53,32,52,21,51,50,31,15,25,41,26,22,33,24,43,11,14,42,35,28,17)
 
 est_nome <- c('Acre','Alagoas','Amapa','Amazonas','Bahia','Ceara','Distrito Federal','Espirito Santo','Goias','Maranhao','Mato Grosso','Mato Grosso do Sul','Minas Gerais','Para','Paraiba','Parana','Pernambuco','Piaui','Rio de Janeiro','Rio Grande do Norte','Rio Grande do Sul','Rondonia','Roraima','Santa Catarina','Sao Paulo','Sergipe','Tocantins')
@@ -90,7 +75,7 @@ Sidebar {.sidebar}
 =====================================
 
 ```{r}
-# SELECOES
+# Selecoes
 helpText("Selecione um ou mais Estados e a estatistica a ser apresentada e clique em Atualizar para gerar gráficos, mapas e tabela. Adicione todos os Estados para gerar estatísticas a nível Brasil.")
 selectInput("estado",h3("Estados"),choices = est_nome, selected = "Sao Paulo", multiple =  TRUE)
 radioButtons("dados", label = h3("Estatística"),
@@ -100,6 +85,7 @@ actionButton("update","Atualizar")
 br()
 br()
 br()
+# Contato
 tags$h5("Desenvolvido por Sérgio Costa")
 tags$a(href="mailto:sergio.vscf@gmail.com", "sergio.vscf@gmail.com", target="_blank")
 br()
@@ -108,6 +94,7 @@ br()
 tags$a(href="https://www.linkedin.com/in/sergio-costafh/", "linkedin/sergio-costafh", target="_blank")
 br()
 
+# Funcoes reativas
 indice <- eventReactive(input$update,
                         {i <- match(input$estado, est_nome)
                         i})
@@ -138,7 +125,6 @@ Column {data-width}
 ```{r,dpi=300}
 renderPlot({
   
-# FILTROS
 ifelse(dados_escolha()==1,
        {mais_afetados <- dados_municipio%>%filter(date==Sys.Date(),state%in%uf_escolha(),ac_cases>1,!is.na(city_name))%>%top_n(5,ac_cases)},
        {mais_afetados <- dados_municipio%>%filter(date==Sys.Date(),state%in%uf_escolha(),ac_deaths>1,!is.na(city_name))%>%top_n(5,ac_deaths)})
@@ -185,7 +171,6 @@ ggplot()+
 ```{r,dpi=300}
 renderPlot({
   
-# FILTROS
 ifelse(dados_escolha()==1,
        {mais_afetados <- dados_municipio%>%filter(date==Sys.Date(),state%in%uf_escolha(),ac_cases>1,!is.na(city_name))%>%top_n(5,ac_cases)},
        {mais_afetados <- dados_municipio%>%filter(date==Sys.Date(),state%in%uf_escolha(),ac_deaths>1,!is.na(city_name))%>%top_n(5,ac_deaths)})
@@ -226,7 +211,6 @@ ggplot()+
 })
 
 
-
 ```
 
 
@@ -235,17 +219,6 @@ Column {data-width}
 
 ### Casos por municipio
 ```{r,dpi=300}
-# renderDataTable({
-#   covid_mun_hj <- dados_municipio%>%filter(date==Sys.Date(),state%in%uf_escolha())%>%
-#     select(state,city_name,ac_cases,ac_deaths)%>%
-#     arrange(-ac_cases)%>%
-#     rename("UF"=state,
-#       "Municipio"=city_name,
-#            "Casos confirmados"=ac_cases,
-#            "Obitos notificados"=ac_deaths)%>%
-#     replace_na(list(Municipio = 'Nao informado'))
-#   datatable(covid_mun_hj,options = list(dom = 't',scrollY='300px',paging = FALSE),rownames = FALSE)
-  
  table <- reactive({
       covid_mun_hj <- dados_municipio%>%filter(date==Sys.Date(),state%in%uf_escolha())%>%
     select(state,city_name,ac_cases,ac_deaths)%>%
