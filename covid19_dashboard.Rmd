@@ -1,0 +1,351 @@
+---
+title: "BR Covid-19 - Monitor de Dados Oficiais"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    social: menu
+    source_code: embed
+    theme: yeti
+    css: styles.css
+runtime: shiny
+---
+
+<style>
+.reveal .slides{
+    width: 90% !important;
+}
+</style>
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(shiny)
+library(dplyr)
+library(ggplot2)
+library(viridis)
+library(cowplot)
+library(jsonlite)
+library(RCurl)
+library(stringr)
+library(lubridate)
+library(tidyverse)
+library(rgeos)
+library(brazilmaps)
+library(geofacet)
+library(ggrepel)
+library(knitr)
+library(kableExtra)
+
+url_dados <- "https://api.especiaisg1.globo/api/eventos/brasil/"
+
+dados_municipio <- fromJSON(getURL(url_dados)) %>%
+  as.data.frame() %>%
+select_all(~str_remove(., "docs.")) %>%
+  mutate(date = ymd(date)) %>% 
+  replace_na(list(date = Sys.Date())) %>% 
+  arrange(city_cod, date)
+
+dados_municipio_aux <- dados_municipio %>% 
+  group_by(city_cod, state, city_name) %>% 
+  summarise(dtmin = min(date, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  mutate(
+    dtmax = Sys.Date(),
+    date = map2(dtmin, dtmax,  ~seq.Date(.x, .y, "day"))
+  ) %>% 
+  unnest(date) %>% 
+  select(city_cod, state, city_name, date)
+
+dados_municipio <- dados_municipio %>% 
+  full_join(dados_municipio_aux) %>% 
+  arrange(state, date) %>% 
+  replace_na(list(cases = 0)) %>% 
+  replace_na(list(deaths = 0)) %>% 
+  group_by(city_cod) %>% 
+  mutate(ac_cases = cumsum(cases), ac_deaths = cumsum(deaths)) %>% 
+  filter(ac_cases > 0) %>% 
+  mutate(days = row_number()) %>% 
+  ungroup() %>%
+  arrange(date)
+
+popmun <- read.csv2('pop_municipios.csv',encoding = 'UTF-8')
+
+dados_municipio$pop <- popmun$pop[match(dados_municipio$city_cod,popmun[,1])]
+dados_municipio$city_name <- stringi::stri_trans_general(str = popmun$city_name[match(dados_municipio$city_cod,popmun[,1])], 
+                                   id = "Latin-ASCII")
+dados_municipio <- dados_municipio%>%mutate(ac_cases_m = ac_cases * 100000 / pop,
+                                                ac_deaths_m = ac_deaths * 100000 / pop)
+
+estados <- c(12,27,16,13,29,23,53,32,52,21,51,50,31,15,25,41,26,22,33,24,43,11,14,42,35,28,17)
+
+est_nome <- c('Acre','Alagoas','Amapa','Amazonas','Bahia','Ceara','Distrito Federal','Espirito Santo','Goias','Maranhao','Mato Grosso','Mato Grosso do Sul','Minas Gerais','Para','Paraiba','Parana','Pernambuco','Piaui','Rio de Janeiro','Rio Grande do Norte','Rio Grande do Sul','Rondonia','Roraima','Santa Catarina','Sao Paulo','Sergipe','Tocantins')
+
+est_nomes_completo <- c('Estado do Acre','Estado do Alagoas','Estado do Amapa','Estado do Amazonas','Estado da Bahia','Estado do Ceara','Estado do Distrito Federal','Estado do Espirito Santo','Estado de Goias','Estado do Maranhao','Estado do Mato Grosso','Estado do Mato Grosso do Sul','Estado de Minas Gerais','Estado do Para','Estado da Paraiba','Estado do Parana','Estado de Pernambuco','Estado do Piaui','Estado do Rio de Janeiro','Estado do Rio Grande do Norte','Estado do Rio Grande do Sul','Estado de Rondonia','Estado de Roraima','Estado de Santa Catarina','Estado de Sao Paulo','Estado do Sergipe','Estado do Tocantins')
+
+uf <- c('AC','AL','AM','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO')
+
+```
+
+Sidebar {.sidebar}
+=====================================
+
+```{r}
+# SELECOES
+helpText("Selecione um ou mais Estados e a estatistica a ser apresentada e clique em Atualizar para gerar gráficos, mapas e tabela. Adicione todos os Estados para gerar estatísticas a nível Brasil.")
+selectInput("estado",h3("Estados"),choices = est_nome, selected = "Sao Paulo", multiple =  TRUE)
+radioButtons("dados", label = h3("Estatística"),
+    choices = list("Casos notificados", "Obitos notificados"), 
+    selected = "Casos notificados")
+actionButton("update","Atualizar")
+br()
+br()
+br()
+tags$h5("Desenvolvido por Sérgio Costa")
+tags$a(href="mailto:sergio.vscf@gmail.com", "sergio.vscf@gmail.com", target="_blank")
+br()
+tags$a(href="https://mensura-r.netlify.app", "mensura-r.netlify.app", target="_blank")
+br()
+tags$a(href="https://www.linkedin.com/in/sergio-costafh/", "linkedin/sergio-costafh", target="_blank")
+br()
+
+indice <- eventReactive(input$update,
+                        {i <- match(input$estado, est_nome)
+                        i})
+
+
+dados_escolha <- eventReactive(input$update,
+                               {d <- ifelse(input$dados=="Casos notificados",1,2)
+                               d})
+
+indice_n <- eventReactive(input$update,{i <- estados[indice()]
+                          i})
+estado <- eventReactive(input$update,{e <- est_nomes_completo[indice()]
+                          e})
+uf_escolha <- eventReactive(input$update,{u <- uf[indice()]
+                                         u})
+
+```
+
+Visão Global 
+=====================================  
+
+Column {data-width}
+-----------------------------------------------------------------------
+
+
+### Avanço em números absolutos
+
+```{r,dpi=300}
+renderPlot({
+  
+# FILTROS
+ifelse(dados_escolha()==1,
+       {mais_afetados <- dados_municipio%>%filter(date==Sys.Date(),state%in%uf_escolha(),ac_cases>1,!is.na(city_name))%>%top_n(5,ac_cases)},
+       {mais_afetados <- dados_municipio%>%filter(date==Sys.Date(),state%in%uf_escolha(),ac_deaths>1,!is.na(city_name))%>%top_n(5,ac_deaths)})
+
+dados_municipio_plot <- dados_municipio%>%filter(city_cod%in%unique(mais_afetados$city_cod),date!=Sys.Date())
+
+dados_municipio_plot <- dados_municipio_plot%>%mutate(eixo_y = case_when(dados_escolha()==1~ac_cases,
+                                                               TRUE~ac_deaths),
+                                            eixo_y_m = case_when(dados_escolha()==1~ac_cases_m,
+                                                                 TRUE~ac_deaths_m))
+x <- max(dados_municipio_plot$eixo_y)
+break_int <- as.numeric(paste(1,paste(rep(0,nchar(x)-1),collapse = ""),sep=""))*case_when(substr(x,1,1)==1~.15,
+                                                                             substr(x,1,1)==2~.25,
+                                                                             substr(x,1,1)==3~.5,
+                                                                             substr(x,1,1)==4~.5,
+                                                                             substr(x,1,1)==5~.5,
+                                                                             substr(x,1,1)==6~1,
+                                                                             substr(x,1,1)==7~1,
+                                                                             substr(x,1,1)==1~1,
+                                                                             substr(x,1,1)==9~1)
+
+
+ggplot()+
+  geom_line(aes(x=days,y=eixo_y,color=city_name),size=1.3,dados_municipio_plot,show.legend = F)+
+  geom_label_repel(aes(x=days,y=eixo_y,label=city_name,fill=city_name),nudge_y = 2,nudge_x = 1,segment.alpha = 0.2,data=subset(dados_municipio_plot,dados_municipio_plot$date==Sys.Date()-1),show.legend = F)+
+  scale_y_continuous(expand=c(0,-100),limits=c(-100,max(dados_municipio_plot$eixo_y)+102),breaks=seq(0,1000000,break_int))+
+  scale_x_continuous(expand=c(0,-5),limits=c(-5,max(dados_municipio_plot$days+14)),breaks=seq(0,700,5))+
+  labs(x='Dias após o primeiro caso confirmado',y=paste0(ifelse(dados_escolha()==1,'Casos confirmados','Obitos notificados')),
+       title=paste0(ifelse(dados_escolha()==1,"Casos confirmados de","Obitos notificados por"),' COVID-19'),
+       subtitle=paste0('Municípios mais afetados', ifelse(length(indice_n())==1,paste0(' no ', estado()),ifelse(length(indice_n())==27," no Brasil",""))),
+       caption=paste0(ifelse(length(indice_n())>1 & length(indice_n())<27,paste0('Estados: ',paste0(uf_escolha(),collapse = ', '),' \n'),"")))+
+  scale_linetype_manual(name='',values=c('solid'))+
+  scale_color_viridis_d(name='Países (casos confirmados)')+
+  scale_fill_viridis_d(name='Países (casos confirmados)',alpha=.3)+
+  theme_cowplot()+
+  theme(legend.position = 'bottom')
+  
+})
+
+```
+
+### Avanço normalizado
+
+```{r,dpi=300}
+renderPlot({
+  
+# FILTROS
+ifelse(dados_escolha()==1,
+       {mais_afetados <- dados_municipio%>%filter(date==Sys.Date(),state%in%uf_escolha(),ac_cases>1,!is.na(city_name))%>%top_n(5,ac_cases)},
+       {mais_afetados <- dados_municipio%>%filter(date==Sys.Date(),state%in%uf_escolha(),ac_deaths>1,!is.na(city_name))%>%top_n(5,ac_deaths)})
+
+dados_municipio_plot <- dados_municipio%>%filter(city_cod%in%unique(mais_afetados$city_cod), date!=Sys.Date())
+
+dados_municipio_plot <- dados_municipio_plot%>%mutate(eixo_y = case_when(dados_escolha()==1~ac_cases_m,
+                                                                 TRUE~ac_deaths_m))
+
+x <- max(round(dados_municipio_plot$eixo_y,0))
+break_int <- as.numeric(paste(1,paste(rep(0,nchar(x)-1),collapse = ""),sep=""))*case_when(substr(x,1,1)==1~.15,
+                                                                             substr(x,1,1)==2~.25,
+                                                                             substr(x,1,1)==3~.5,
+                                                                             substr(x,1,1)==4~.5,
+                                                                             substr(x,1,1)==5~.5,
+                                                                             substr(x,1,1)==6~1,
+                                                                             substr(x,1,1)==7~1,
+                                                                             substr(x,1,1)==1~1,
+                                                                             substr(x,1,1)==9~1)
+
+
+
+ggplot()+
+  geom_line(aes(x=days,y=eixo_y,color=city_name),size=1.3,dados_municipio_plot,show.legend = F)+
+  geom_label_repel(aes(x=days,y=eixo_y,label=city_name,fill=city_name),nudge_y = 2,nudge_x = 1,segment.alpha = 0.2,data=subset(dados_municipio_plot,dados_municipio_plot$date==Sys.Date()-1),show.legend = F)+
+  scale_y_continuous(expand=c(0,-100),limits=c(-100,max(dados_municipio_plot$eixo_y)+102),breaks=seq(0,1000000,break_int))+
+  scale_x_continuous(expand=c(0,-5),limits=c(-5,max(dados_municipio_plot$days+14)),breaks=seq(0,700,5))+
+  labs(x='Dias após o primeiro caso confirmado',y=paste0(ifelse(dados_escolha()==1,'Casos confirmados','Obitos notificados'), ' x(100 mil habitantes)'),
+       title=paste0(ifelse(dados_escolha()==1,"Casos confirmados de","Obitos notificados por"),' COVID-19 a cada 100 mil habitantes'),
+       subtitle=paste0('Municípios mais afetados', ifelse(length(indice_n())==1,paste0(' no ', estado()),ifelse(length(indice_n())==27," no Brasil",""))),
+       caption=paste0(ifelse(length(indice_n())>1 & length(indice_n())<27,paste0('Estados: ',paste0(uf_escolha(),collapse = ', '),' \n'),"")))+
+  scale_linetype_manual(name='',values=c('solid'))+
+  scale_color_viridis_d(name='Países (casos confirmados)')+
+  scale_fill_viridis_d(name='Países (casos confirmados)',alpha=.3)+
+  theme_cowplot()+
+  theme(legend.position = 'bottom')
+
+})
+
+
+
+```
+
+
+Column {data-width}
+-----------------------------------------------------------------------
+
+### Casos por municipio
+```{r,dpi=300}
+# renderDataTable({
+#   covid_mun_hj <- dados_municipio%>%filter(date==Sys.Date(),state%in%uf_escolha())%>%
+#     select(state,city_name,ac_cases,ac_deaths)%>%
+#     arrange(-ac_cases)%>%
+#     rename("UF"=state,
+#       "Municipio"=city_name,
+#            "Casos confirmados"=ac_cases,
+#            "Obitos notificados"=ac_deaths)%>%
+#     replace_na(list(Municipio = 'Nao informado'))
+#   datatable(covid_mun_hj,options = list(dom = 't',scrollY='300px',paging = FALSE),rownames = FALSE)
+  
+ table <- reactive({
+      covid_mun_hj <- dados_municipio%>%filter(date==Sys.Date(),state%in%uf_escolha())%>%
+    select(state,city_name,ac_cases,ac_deaths)%>%
+    arrange(-ac_cases)%>%
+    rename("UF"=state,
+      "Municipio"=city_name,
+           "Casos confirmados"=ac_cases,
+           "Obitos notificados"=ac_deaths)%>%
+    replace_na(list(Municipio = 'Nao informado'))
+
+    kable(covid_mun_hj)%>%
+      kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+  })
+
+renderUI({
+ HTML(table())
+})
+```
+
+### Casos acumulados
+```{r}
+renderValueBox({
+dados_ag <- dados_municipio%>%filter(state%in%uf_escolha(),date==Sys.Date())%>%summarise(mortes=sum(ac_deaths),casos=sum(ac_cases))
+
+valueBox(dados_ag$casos,paste0('Casos confirmados ',ifelse(length(uf_escolha())==1,paste0('no ',estado()),ifelse(length(uf_escolha())==27,paste0('no Brasil'),paste0('nos Estados: ',paste0(uf_escolha(),collapse = ', '))))))
+
+})
+```
+
+### Obitos acumulados
+```{r}
+renderValueBox({
+dados_ag <- dados_municipio%>%filter(state%in%uf_escolha(),date==Sys.Date())%>%summarise(mortes=sum(ac_deaths),casos=sum(ac_cases))
+  valueBox(dados_ag$mortes,paste0('Mortes notificadas ',ifelse(length(uf_escolha())==1,paste0('no ',estado()),ifelse(length(uf_escolha())==27,paste0('no Brasil'),paste0('nos Estados: ',paste0(uf_escolha(),collapse = ', '))))))
+})
+```
+
+Mapa de notificações
+=====================================  
+Column {data-width}
+-----------------------------------------------------------------------
+
+### Municípios por Estado
+
+```{r}
+renderPlot({
+mun_map <- get_brmap(geo = "City",
+                       geo.filter = list(State = indice_n()),
+                       class = 'sf')
+
+est_map <- get_brmap(geo = "State",
+                     geo.filter = list(State = indice_n()),
+                     class = 'sf')
+
+covid_mun_hj <- dados_municipio%>%filter(date==Sys.Date())
+  ifelse(dados_escolha()==1,
+                           mun_map$eixo_y <- covid_mun_hj$ac_cases[match(mun_map$City,covid_mun_hj$city_cod)],
+                           mun_map$eixo_y <- covid_mun_hj$ac_deaths[match(mun_map$City,covid_mun_hj$city_cod)])
+  mun_map$eixo_y[which(is.na(mun_map$eixo_y))] <- 0
+
+mun_map$ac_class <- cut(mun_map$eixo_y,breaks = c(-Inf,0,10,50,250,1000,5000,Inf), labels=c('Nenhum','1 a 10','11 a 50','51 a 250','251 a 1.000','1.001 a 5.000','mais de 5.000'))
+
+centroids <- gCentroid(get_brmap(geo = "City",
+                                 geo.filter = list(State = indice_n()),
+                                 class = 'SpatialPolygonsDataFrame'),byid = TRUE)
+
+cent <- data.frame(coordinates(centroids), mun_map$nome,mun_map$City)
+cent$pop <- popmun$pop[match(cent$mun_map.City,popmun[,1])]
+cent$ac_cases <- covid_mun_hj$ac_cases[match(cent$mun_map.City,covid_mun_hj[,1])]
+
+ifelse(dados_escolha()==1,
+                           cent$eixo_y <- covid_mun_hj$ac_cases[match(cent$mun_map.City,covid_mun_hj$city_cod)],
+                           cent$eixo_y <- covid_mun_hj$ac_deaths[match(cent$mun_map.City,covid_mun_hj$city_cod)])
+
+cent <- cent%>%filter(eixo_y>10)
+if(nrow(cent)>15){cent <- cent%>%filter(eixo_y>50)}
+if(nrow(cent)>15){cent <- cent%>%filter(eixo_y>250)}
+
+ggplot()+
+    geom_sf(aes(fill=ac_class),size=.3,color='darkgray',mun_map)+
+    geom_sf(aes(),fill=alpha('white',0),color='black',size=.3,est_map)+
+    geom_point(aes(x,y),size=.5,cent)+
+    geom_text_repel(aes(x,y,label=mun_map.nome),fontface='bold',segment.alpha = .2,color='black',size=4,cent)+
+    scale_fill_brewer(name=paste0(ifelse(dados_escolha()==1,'Casos notificados','Óbitos notificados')), palette=7)+
+    labs(title=paste0(ifelse(dados_escolha()==1,'Casos notificados de','Obito notificados por'),' COVID-19', ifelse(length(indice_n())==1,paste0(' no ', estado()),ifelse(length(indice_n())==27," no Brasil",""))),
+         subtitle = paste0(ifelse(length(indice_n())>1 & length(indice_n())<27,paste0('Estados: ',paste0(uf_escolha(),collapse = ', ')),"")),
+       caption=paste0('Atualizado em: ', format.Date(Sys.Date(),'%d/%m/%Y'),' \n Fonte dos dados: Secretarias Estaduais de Saúde \n Autor: Sérgio Costa (mensura-r.netlify.com | sergio.vscf@gmail.com)',sep=''))+
+    theme_cowplot()+
+    theme(axis.line=element_blank(),
+          axis.text.x=element_blank(),
+          axis.text.y=element_blank(),
+          axis.ticks=element_blank(),
+          axis.title.x=element_blank(),
+          axis.title.y=element_blank(),
+          panel.background=element_blank(),
+          panel.border=element_blank(),
+          panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank(),
+          plot.background=element_blank())
+
+})
+
+```
