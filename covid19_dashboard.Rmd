@@ -155,7 +155,7 @@ break_int <- as.numeric(paste(1,paste(rep(0,nchar(x)-1),collapse = ""),sep=""))*
 ggplot()+
   geom_line(aes(x=days,y=eixo_y,color=city_name),size=1.3,dados_municipio_plot,show.legend = F)+
   geom_label_repel(aes(x=days,y=eixo_y,label=city_name,fill=city_name),nudge_y = ifelse(dados_escolha()==1,50,10),nudge_x = 1,segment.alpha = 0.2,data=subset(dados_municipio_plot,dados_municipio_plot$date==Sys.Date()-1),show.legend = F)+
-  scale_y_continuous(expand=c(0,-100),limits=c(-100,max(dados_municipio_plot$eixo_y)+102),breaks=seq(0,1000000,break_int))+
+  scale_y_continuous(expand=c(0,-100),limits=c(-100,max(dados_municipio_plot$eixo_y)+101),breaks=seq(0,1000000,break_int))+
   scale_x_continuous(expand=c(0,-5),limits=c(-5,max(dados_municipio_plot$days+14)),breaks=seq(0,700,5))+
   labs(x='Dias após o primeiro caso confirmado',y=paste0(ifelse(dados_escolha()==1,'Casos confirmados','Óbitos notificados')),
        title=paste0(ifelse(dados_escolha()==1,"Casos confirmados de","Óbitos notificados por"),' COVID-19'),
