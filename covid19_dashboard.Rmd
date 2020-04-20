@@ -90,15 +90,11 @@ Sidebar {.sidebar}
 =====================================
 
 ```{r}
-helpText("Selecione o Estado e a estatistica a ser apresentada.")
-
-selectInput("estado",h3("Estados"),choices = est_selecoes, selected = "Todos os Estados", multiple = FALSE)
-radioButtons("dados", label = h3("Estatística"),
+selectInput("estado",h4("Estados"),choices = est_selecoes, selected = "Todos os Estados", multiple = FALSE)
+radioButtons("dados", label = h4("Estatística"),
     choices = list("Casos notificados", "Óbitos notificados"), 
     selected = "Casos notificados")
 #actionButton("update","Atualizar")
-br()
-br()
 br()
 tags$h5("Desenvolvido por Sérgio Costa")
 tags$a(href="mailto:sergio.vscf@gmail.com", "sergio.vscf@gmail.com", target="_blank")
@@ -147,8 +143,8 @@ dados_municipio_plot <- dados_municipio_plot%>%mutate(eixo_y = case_when(dados_e
                                             eixo_y_m = case_when(dados_escolha()==1~ac_cases_m,
                                                                  TRUE~ac_deaths_m))
 x <- max(dados_municipio_plot$eixo_y)
-break_int <- as.numeric(paste(1,paste(rep(0,nchar(x)-1),collapse = ""),sep=""))*case_when(substr(x,1,1)==1~.15,
-                                                                             substr(x,1,1)==2~.25,
+break_int <- as.numeric(paste(1,paste(rep(0,nchar(x)-1),collapse = ""),sep=""))*case_when(substr(x,1,1)==1~.2,
+                                                                             substr(x,1,1)==2~.5,
                                                                              substr(x,1,1)==3~.5,
                                                                              substr(x,1,1)==4~.5,
                                                                              substr(x,1,1)==5~.5,
@@ -190,8 +186,8 @@ dados_municipio_plot <- dados_municipio_plot%>%mutate(eixo_y = case_when(dados_e
                                                                  TRUE~ac_deaths_m))
 
 x <- max(round(dados_municipio_plot$eixo_y,0))
-break_int <- as.numeric(paste(1,paste(rep(0,nchar(x)-1),collapse = ""),sep=""))*case_when(substr(x,1,1)==1~.15,
-                                                                             substr(x,1,1)==2~.25,
+break_int <- as.numeric(paste(1,paste(rep(0,nchar(x)-1),collapse = ""),sep=""))*case_when(substr(x,1,1)==1~.2,
+                                                                             substr(x,1,1)==2~.5,
                                                                              substr(x,1,1)==3~.5,
                                                                              substr(x,1,1)==4~.5,
                                                                              substr(x,1,1)==5~.5,
